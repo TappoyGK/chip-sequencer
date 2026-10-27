@@ -56,3 +56,19 @@ runner when the toolchain lacks libFuzzer. Musical samples are synthetic.
 ## License
 
 [MIT](LICENSE).
+
+### JSON diagnostics
+
+Use `cs_model_read_ex`, `cs_sequence_read_ex`, or `cs_compile_ex` with a
+caller-owned `CSDiagnostic` to receive the first error's reason, JSON Pointer,
+byte offset, and one-based line/byte-column. Missing fields name the absent
+field in the pointer and locate its containing object. Syntax errors locate
+the offending byte (or end of input), with an empty pointer.
+
+`code` distinguishes invalid input (`CA_INVALID`), configured resource limits
+(`CA_LIMIT`), and allocation failure (`CA_MEMORY`). Where no input location
+exists, offset is `SIZE_MAX` and line/column are zero. Strings are always
+NUL-terminated; check `truncated` before treating a pointer as complete.
+Successful calls clear every diagnostic field. Passing `NULL` omits details;
+there is no global error state or library logging. The standalone renderer
+prints these diagnostics to stderr.

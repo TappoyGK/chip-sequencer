@@ -29,3 +29,10 @@ test: test-controls
 .PHONY: test-controls
 test-controls: $(BUILD_DIR)/model-probe
 	python3 tests/control-test.py $(BUILD_DIR)/model-probe
+
+$(BUILD_DIR)/diagnostic-probe: tests/diagnostic-probe.c $(BUILD_DIR)/libchip-sequencer.a $(CHIP_AUDIO_LIB)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -UNDEBUG $< $(BUILD_DIR)/libchip-sequencer.a $(CHIP_AUDIO_LIB) -lm -o $@
+test: test-diagnostics
+.PHONY: test-diagnostics
+test-diagnostics: $(BUILD_DIR)/diagnostic-probe
+	python3 tests/diagnostic-test.py $(BUILD_DIR)/diagnostic-probe

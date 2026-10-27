@@ -7,6 +7,19 @@ extern "C" {
 typedef struct CSModel CSModel;
 typedef struct CSSequence CSSequence;
 typedef struct CSPlayer CSPlayer;
+/* Per-call, caller-owned diagnostic. On success all fields are zero.
+   offset is a zero-based byte offset; line/column are one-based byte positions.
+   path is an RFC 6901 JSON Pointer (empty means the document root).
+   For missing fields, path names the field and offset points at its container.
+   Failures without an input location use
+   offset=SIZE_MAX and line=column=0. Fixed strings are NUL-terminated;
+   truncated is nonzero if a path or message did not fit. */
+typedef struct {
+    CAResult code;
+    size_t offset, line, column;
+    char path[512], message[256];
+    int truncated;
+} CSDiagnostic;
 typedef enum { CS_ONCE, CS_LOOP } CSMode;
 typedef struct {
     int64_t output_sample, performance_sample, source_sample;
@@ -20,6 +33,10 @@ void cs_model_destroy(CSModel *);
 CSSequence *cs_compile(const CSModel *, const CALimits *, CAResult *);
 uint64_t cs_sequence_revision(const CSSequence *);
 CSSequence *cs_sequence_read(const char *utf8, size_t bytes, const CALimits *, CAResult *);
+/* Same operations with optional detailed diagnostics; no global error state. */
+CSModel *cs_model_read_ex(const char *, size_t, const CALimits *, CAResult *, CSDiagnostic *);
+CSSequence *cs_sequence_read_ex(const char *, size_t, const CALimits *, CAResult *, CSDiagnostic *);
+CSSequence *cs_compile_ex(const CSModel *, const CALimits *, CAResult *, CSDiagnostic *);
 CAResult cs_sequence_write(const CSSequence *, char *buffer, size_t capacity, size_t *required);
 CSSequence *cs_sequence_retain(const CSSequence *);
 void cs_sequence_destroy(CSSequence *);

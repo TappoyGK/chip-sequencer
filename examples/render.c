@@ -6,8 +6,11 @@ int main(int argc,char **argv){
     if(argc!=3){fprintf(stderr,"usage: render sequence.json output.s16le\n");return 2;}
     CALimits l={.input_bytes=16<<20,.allocated_bytes=256<<20,.events=1000000,.visits=100000,.checkpoints=128,.repeat_depth=16,.se_instances=17,.commands=256,.retired_objects=256,.command_results=256,.gain_bindings=256,.score_samples=INT64_C(44100)*86400,.performance_samples=INT64_C(44100)*86400};
     FILE *f=fopen(argv[1],"rb");if(!f)return 1;if(fseek(f,0,SEEK_END)){fclose(f);return 1;}long length=ftell(f);if(length<0||(size_t)length>l.input_bytes){fclose(f);return 1;}rewind(f);
-    char *json=malloc((size_t)length);if(!json){fclose(f);return 1;}size_t n=fread(json,1,(size_t)length,f);fclose(f);CAResult error;
-    CSSequence *s=n==(size_t)length?cs_sequence_read(json,n,&l,&error):NULL;free(json);if(!s){fprintf(stderr,"invalid sequence\n");return 1;}
+    char *json=malloc((size_t)length+1);if(!json){fclose(f);return 1;}size_t n=fread(json,1,(size_t)length,f);fclose(f);CAResult error;
+    if(n!=(size_t)length){free(json);fprintf(stderr,"%s: cannot read complete file\n",argv[1]);return 1;}
+    CSDiagnostic diagnostic;CSSequence *s=cs_sequence_read_ex(json,n,&l,&error,&diagnostic);free(json);
+    if(!s){fprintf(stderr,"%s:%zu:%zu: %s: %s\n",argv[1],diagnostic.line,diagnostic.column,
+        diagnostic.path[0]?diagnostic.path:"/",diagnostic.message);return 1;}
     CSPlayer *p=cs_player_prepare(s,CS_ONCE,&l,&error);CAMixer *m=ca_mixer_create(&l,&error);CAHandle h;int ok=p&&m&&cs_play(m,p,0,&h)==CA_OK;
     if(!ok)cs_player_destroy(p);f=ok?fopen(argv[2],"wb"):NULL;if(!f)ok=0;
     for(int64_t at=0,frames=cs_sequence_plan_length(s,0);ok&&at<frames;){int16_t pcm[735];unsigned char bytes[1470];size_t take=(size_t)(frames-at<735?frames-at:735);CAOutput out={.pcm=pcm};ok=ca_mixer_render(m,take,&out)==CA_OK;

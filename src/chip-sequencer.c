@@ -17,19 +17,23 @@ struct CSEdit {CAOperation *operation;};
 static atomic_uint_fast64_t revisions=1;
 static const char sequence_provider;
 static int compare_ids(const void *a,const void *b){return strcmp(a,b);}
-static int idstring(const JP *p,size_t at,char out[129]){
-    if(!jstring(p,at,out,129)||!out[0])return 0;
-    for(char *c=out;*c;c++)if(!((*c>='A'&&*c<='Z')||(*c>='a'&&*c<='z')||(*c>='0'&&*c<='9')||*c=='_'||*c=='.'||*c=='-'))return 0;return 1;
+static int idstring(JP *p,size_t at,char out[129]){
+    if(!jstring(p,at,out,129)||!out[0])return jfail(p,at,CA_INVALID,"Expected a nonempty ASCII identifier (maximum 128 bytes)");
+    for(char *c=out;*c;c++)if(!((*c>='A'&&*c<='Z')||(*c>='a'&&*c<='z')||(*c>='0'&&*c<='9')||*c=='_'||*c=='.'||*c=='-'))return jfail(p,at,CA_INVALID,"Identifier permits only letters, digits, underscore, dot and hyphen");return 1;
 }
-static int array(const JP *p,size_t at,size_t max){return at<p->used&&p->tokens[at].kind=='['&&p->tokens[at].count<=max;}
-static int fieldint(const JP *p,size_t at,const char *key,int64_t lo,int64_t hi,int64_t *value){return jint(p,jget(p,at,key),lo,hi,value);}
-static int fieldnum(const JP *p,size_t at,const char *key,double lo,double hi,double *value){return jnumber(p,jget(p,at,key),lo,hi,value);}
-static int lookup(char ids[][129],int count,const JP *p,size_t at){for(int i=0;i<count;i++)if(jeq(p,at,ids[i]))return i;return -1;}
-static int sound_index(Timbre *sounds,size_t count,const JP *p,size_t at){for(size_t i=0;i<count;i++)if(jeq(p,at,sounds[i].id))return (int)i;return -1;}
-static int parse_sound(const JP *p,size_t at,Timbre *t){
+static int array(JP *p,size_t at,size_t max){
+    p->context=at;
+    if(at>=p->used||p->tokens[at].kind!='[')return jfail(p,at,CA_INVALID,"Expected an array");
+    return p->tokens[at].count<=max || jfail(p,at,CA_LIMIT,"Array exceeds item limit %zu",max);
+}
+static int fieldint(JP *p,size_t at,const char *key,int64_t lo,int64_t hi,int64_t *value){return jint(p,jrequired(p,at,key),lo,hi,value);}
+static int fieldnum(JP *p,size_t at,const char *key,double lo,double hi,double *value){return jnumber(p,jrequired(p,at,key),lo,hi,value);}
+static int lookup(char ids[][129],int count,JP *p,size_t at){for(int i=0;i<count;i++)if(jeq(p,at,ids[i]))return i;jfail(p,at,CA_INVALID,"Unknown source_id");return -1;}
+static int sound_index(Timbre *sounds,size_t count,JP *p,size_t at){for(size_t i=0;i<count;i++)if(jeq(p,at,sounds[i].id))return (int)i;jfail(p,at,CA_INVALID,"Unknown sound reference");return -1;}
+static int parse_sound(JP *p,size_t at,Timbre *t){
     if(!jobject(p,at,"id duty vibrato_hz vibrato_cents vibrato_delay_seconds attack_seconds decay_seconds sustain_level release_seconds tom_enabled tom_seconds tom_semitones")||!idstring(p,jget(p,at,"id"),t->id))return 0;
-    size_t flag=jget(p,at,"tom_enabled");if(flag>=p->used||(p->tokens[flag].kind!='t'&&p->tokens[flag].kind!='f'))return 0;t->tom=p->tokens[flag].kind=='t';
-    return fieldnum(p,at,"duty",.125,.75,&t->duty)&&(t->duty==.125||t->duty==.25||t->duty==.5||t->duty==.75)&&
+    size_t flag=jget(p,at,"tom_enabled");if(flag>=p->used||(p->tokens[flag].kind!='t'&&p->tokens[flag].kind!='f'))return jfail(p,flag,CA_INVALID,"Expected a boolean");t->tom=p->tokens[flag].kind=='t';
+    return fieldnum(p,at,"duty",.125,.75,&t->duty)&&(t->duty==.125||t->duty==.25||t->duty==.5||t->duty==.75||jfail(p,jget(p,at,"duty"),CA_INVALID,"Duty must be 0.125, 0.25, 0.5 or 0.75"))&&
         fieldnum(p,at,"vibrato_hz",1,12,&t->rate)&&fieldnum(p,at,"vibrato_cents",0,100,&t->depth)&&
         fieldnum(p,at,"vibrato_delay_seconds",0,1,&t->delay)&&fieldnum(p,at,"attack_seconds",0,.5,&t->attack)&&
         fieldnum(p,at,"decay_seconds",0,2,&t->decay)&&fieldnum(p,at,"sustain_level",0,1,&t->sustain)&&
@@ -49,19 +53,23 @@ static int64_t mapped_sample(const CSSequence *s,int64_t tick){
     }return -1;
 }
 CSSequence *cs_sequence_read(const char *text,size_t bytes,const CALimits *l,CAResult *error){
-    if(error)*error=CA_INVALID;if(!text||!l)return NULL;
-    if(bytes>l->input_bytes||bytes>=l->allocated_bytes){if(error)*error=CA_LIMIT;return NULL;}
-    JP p;if(!jparse(&p,text,bytes,l->allocated_bytes-bytes)){free(p.tokens);return NULL;}
+    return cs_sequence_read_ex(text,bytes,l,error,NULL);
+}
+CSSequence *cs_sequence_read_ex(const char *text,size_t bytes,const CALimits *l,CAResult *error,CSDiagnostic *diagnostic){
+    CAResult local; if(!error)error=&local; *error=CA_INVALID; dreset(diagnostic);
+    if(!text||!l){dset(diagnostic,*error,NULL,0,SIZE_MAX,"Input and limits are required");return NULL;}
+    if(bytes>l->input_bytes||bytes>=l->allocated_bytes){*error=CA_LIMIT;dset(diagnostic,*error,NULL,0,SIZE_MAX,"JSON input exceeds byte or memory budget");return NULL;}
+    JP p;if(!jparse(&p,text,bytes,l->allocated_bytes-bytes,diagnostic)){*error=p.status;free(p.tokens);return NULL;}
     char (*event_ids)[129]=NULL;char (*visit_ids)[129]=NULL;
     CSSequence *s=NULL;Timbre *sounds=NULL;ChipAudioNote *notes[4]={0};ChipPulseChange *changes[2]={0};ChipPulseOnset *onsets[2]={0};ChipDPCMHit *kicks=NULL;ChipEchoTap *echo=NULL;
     size_t counts[4]={0},nc[2]={0},no[2]={0},nk=0,ne=0;
     int64_t length,version,rate;char song[129];
     if(!jobject(&p,0,"format version song_id sample_rate score_samples once_samples first_pass_samples cycle_samples sources sounds events plans positions")||
-        !jeq(&p,jget(&p,0,"format"),"chip-sequence")||!fieldint(&p,0,"version",1,1,&version)||!idstring(&p,jget(&p,0,"song_id"),song)||
+        (!jeq(&p,jget(&p,0,"format"),"chip-sequence")&&!jfail(&p,jget(&p,0,"format"),CA_INVALID,"Expected format 'chip-sequence'"))||!fieldint(&p,0,"version",1,1,&version)||!idstring(&p,jget(&p,0,"song_id"),song)||
         !fieldint(&p,0,"sample_rate",44100,44100,&rate)||!fieldint(&p,0,"score_samples",1,l->score_samples,&length))goto failure;
     size_t sources=jget(&p,0,"sources"),sound_array=jget(&p,0,"sounds"),events=jget(&p,0,"events"),positions=jget(&p,0,"positions"),plans=jget(&p,0,"plans");
-    if(!array(&p,sources,5)||p.tokens[sources].count!=5||!array(&p,sound_array,l->events)||!p.tokens[sound_array].count||
-       !array(&p,events,l->events)||!array(&p,positions,l->events)||!p.tokens[positions].count||!jobject(&p,plans,"once first_pass cycle"))goto failure;
+    if(!array(&p,sources,5)||(p.tokens[sources].count!=5&&!jfail(&p,sources,CA_INVALID,"Exactly five sources are required"))||!array(&p,sound_array,l->events)||(!p.tokens[sound_array].count&&!jfail(&p,sound_array,CA_INVALID,"At least one sound is required"))||
+       !array(&p,events,l->events)||!array(&p,positions,l->events)||(!p.tokens[positions].count&&!jfail(&p,positions,CA_INVALID,"At least one position is required"))||!jobject(&p,plans,"once first_pass cycle"))goto failure;
     // Account peak input/token storage, temporary arrays, compiled DSP tables,
     // plans and map before allocating. 2048/event conservatively covers the
     // private DSP segment/echo span representation as well as decoder arrays.
@@ -78,19 +86,19 @@ CSSequence *cs_sequence_read(const char *text,size_t bytes,const CALimits *l,CAR
     RESERVE(echo_capacity[0],32);RESERVE(echo_capacity[1],32);
 #undef RESERVE
     sounds=calloc(ns,sizeof(*sounds));event_ids=calloc(n?n:1,sizeof(*event_ids));if(!sounds||!event_ids)goto memory;
-    size_t at=sound_array+1;for(size_t i=0;i<ns;i++){if(!parse_sound(&p,at,&sounds[i]))goto failure;for(size_t j=0;j<i;j++)if(!strcmp(sounds[i].id,sounds[j].id))goto failure;at=p.tokens[at].next;}
+    size_t at=sound_array+1;for(size_t i=0;i<ns;i++){if(!parse_sound(&p,at,&sounds[i]))goto failure;for(size_t j=0;j<i;j++)if(!strcmp(sounds[i].id,sounds[j].id)){jfail(&p,jget(&p,at,"id"),CA_INVALID,"Duplicate sound id '%s'",sounds[i].id);goto failure;}at=p.tokens[at].next;}
     char ids[5][129],track_ids[5][129];int used[5]={0},initial[5];double gains[5];int attacks[5],decays[5];ChipAudioTrack tracks[4]={0};
     at=sources+1;for(int i=0;i<5;i++){
         int64_t voice,attack,decay;char id[129],track[129];double gain;
         if(!jobject(&p,at,"id track_id voice wave gain initial_sound dpcm_attack_percent dpcm_decay_ms")||
-           !idstring(&p,jget(&p,at,"id"),id)||!idstring(&p,jget(&p,at,"track_id"),track)||
-           !fieldint(&p,at,"voice",0,4,&voice)||used[voice]||!fieldnum(&p,at,"gain",0,2,&gain)||
+           !idstring(&p,jrequired(&p,at,"id"),id)||!idstring(&p,jget(&p,at,"track_id"),track)||
+           !fieldint(&p,at,"voice",0,4,&voice)||(used[voice]&&!jfail(&p,jget(&p,at,"voice"),CA_INVALID,"Duplicate source voice"))||!fieldnum(&p,at,"gain",0,2,&gain)||
            !fieldint(&p,at,"dpcm_attack_percent",25,150,&attack)||!fieldint(&p,at,"dpcm_decay_ms",5,800,&decay))goto failure;
-        for(int j=0;j<5;j++)if(used[j]&&(!strcmp(id,ids[j])||!strcmp(track,track_ids[j])))goto failure;
+        for(int j=0;j<5;j++)if(used[j]&&(!strcmp(id,ids[j])||!strcmp(track,track_ids[j]))){jfail(&p,jget(&p,at,!strcmp(id,ids[j])?"id":"track_id"),CA_INVALID,"Duplicate source or track identifier");goto failure;}
         used[voice]=1;strcpy(ids[voice],id);strcpy(track_ids[voice],track);gains[voice]=gain;attacks[voice]=(int)attack;decays[voice]=(int)decay;
         initial[voice]=sound_index(sounds,ns,&p,jget(&p,at,"initial_sound"));if(initial[voice]<0)goto failure;
-        size_t wave=jget(&p,at,"wave");if(voice==4){if(!jeq(&p,wave,"dpcm"))goto failure;}else{
-            int w=jeq(&p,wave,"pulse")?CHIP_PULSE:jeq(&p,wave,"triangle")?CHIP_TRIANGLE:jeq(&p,wave,"noise")?CHIP_NOISE:-1;if(w<0)goto failure;tracks[voice].wave=(ChipWave)w;
+        size_t wave=jget(&p,at,"wave");if(voice==4){if(!jeq(&p,wave,"dpcm")){jfail(&p,wave,CA_INVALID,"Voice 4 requires dpcm wave");goto failure;}}else{
+            int w=jeq(&p,wave,"pulse")?CHIP_PULSE:jeq(&p,wave,"triangle")?CHIP_TRIANGLE:jeq(&p,wave,"noise")?CHIP_NOISE:-1;if(w<0){jfail(&p,wave,CA_INVALID,"Expected pulse, triangle or noise wave");goto failure;}tracks[voice].wave=(ChipWave)w;
         }at=p.tokens[at].next;
     }
     for(int i=0;i<4;i++){notes[i]=calloc(n+1,sizeof(ChipAudioNote));if(!notes[i])goto memory;tracks[i].notes=notes[i];}
@@ -99,48 +107,52 @@ CSSequence *cs_sequence_read(const char *text,size_t bytes,const CALimits *l,CAR
     int64_t sound_at[2]={-1,-1};int64_t last=-1;int last_kind=-1;char last_id[129]="";
     at=events+1;for(size_t i=0;i<n;i++){
         int64_t when,end,pitch,volume,release_at,release_samples,delay,offset;char id[129];
-        if(!idstring(&p,jget(&p,at,"id"),id)||!fieldint(&p,at,"sample",0,length-1,&when))goto failure;
-        int voice=lookup(ids,5,&p,jget(&p,at,"source_id"));if(voice<0)goto failure;
-        size_t kind=jget(&p,at,"kind");int order=jeq(&p,kind,"sound")?0:jeq(&p,kind,"onset")?1:jeq(&p,kind,"segment")?2:jeq(&p,kind,"dpcm")?3:jeq(&p,kind,"echo")?4:-1;
-        if(order<0||when<last||(when==last&&(order<last_kind||(order==last_kind&&strcmp(id,last_id)<=0))))goto failure;
+        if(!idstring(&p,jrequired(&p,at,"id"),id)||!fieldint(&p,at,"sample",0,length-1,&when))goto failure;
+        int voice=lookup(ids,5,&p,jrequired(&p,at,"source_id"));if(voice<0)goto failure;
+        size_t kind=jrequired(&p,at,"kind");int order=jeq(&p,kind,"sound")?0:jeq(&p,kind,"onset")?1:jeq(&p,kind,"segment")?2:jeq(&p,kind,"dpcm")?3:jeq(&p,kind,"echo")?4:-1;
+        if(order<0){jfail(&p,kind,CA_INVALID,"Unknown event kind");goto failure;}
+        if(when<last||(when==last&&(order<last_kind||(order==last_kind&&strcmp(id,last_id)<=0)))){jfail(&p,at,CA_INVALID,"Events must be sorted by sample, kind and id, without duplicate ordering keys");goto failure;}
         strcpy(event_ids[i],id);
         last=when;last_kind=order;strcpy(last_id,id);
         if(order==0){
-            if(!jobject(&p,at,"id kind sample source_id sound_id")||voice>1||tracks[voice].wave!=CHIP_PULSE)goto failure;
-            int index=sound_index(sounds,ns,&p,jget(&p,at,"sound_id"));if(index<0||when<=sound_at[voice])goto failure;sound_at[voice]=when;
+            if(!jobject(&p,at,"id kind sample source_id sound_id")||((voice>1||tracks[voice].wave!=CHIP_PULSE)&&!jfail(&p,at,CA_INVALID,"Sound events require pulse voice 0 or 1")))goto failure;
+            int index=sound_index(sounds,ns,&p,jget(&p,at,"sound_id"));if(index<0)goto failure;if(when<=sound_at[voice]){jfail(&p,jget(&p,at,"sample"),CA_INVALID,"Duplicate sound change at the same source and sample");goto failure;}sound_at[voice]=when;
             if(when==0&&nc[voice]==1)changes[voice][0]=change(0,&sounds[index]);else changes[voice][nc[voice]++]=change(when,&sounds[index]);
         }else if(order==1){
-            if(!jobject(&p,at,"id kind sample source_id end")||voice>1||!fieldint(&p,at,"end",when+1,length,&end))goto failure;
+            if(!jobject(&p,at,"id kind sample source_id end")||(voice>1&&!jfail(&p,at,CA_INVALID,"Onset requires voice 0 or 1"))||!fieldint(&p,at,"end",when+1,length,&end))goto failure;
+            if(no[voice]&&when<onsets[voice][no[voice]-1].end){jfail(&p,at,CA_INVALID,"Onset intervals overlap on the same source");goto failure;}
             onsets[voice][no[voice]++]=(ChipPulseOnset){when,end};
         }else if(order==2){
-            if(!jobject(&p,at,"id kind sample source_id end pitch volume release_at release_samples")||voice>3||
+            if(!jobject(&p,at,"id kind sample source_id end pitch volume release_at release_samples")||(voice>3&&!jfail(&p,at,CA_INVALID,"Segment requires voice 0..3"))||
                 !fieldint(&p,at,"end",when+1,length,&end)||!fieldint(&p,at,"pitch",0,127,&pitch)||!fieldint(&p,at,"volume",1,15,&volume)||
-                !fieldint(&p,at,"release_at",0,length,&release_at)||!fieldint(&p,at,"release_samples",0,441000,&release_samples)||(!release_samples&&release_at))goto failure;
+                !fieldint(&p,at,"release_at",0,length,&release_at)||!fieldint(&p,at,"release_samples",0,441000,&release_samples)||(!release_samples&&release_at&&!jfail(&p,jget(&p,at,"release_at"),CA_INVALID,"release_at must be zero when release_samples is zero")))goto failure;
+            if(counts[voice]&&when<notes[voice][counts[voice]-1].at+notes[voice][counts[voice]-1].duration){jfail(&p,jget(&p,at,"sample"),CA_INVALID,"Segments overlap on the same source");goto failure;}
             notes[voice][counts[voice]++]=(ChipAudioNote){when,end-when,(int)pitch,(int)volume,release_at,release_samples};
         }else if(order==3){
-            if(!jobject(&p,at,"id kind sample source_id end offset volume")||voice!=4||!fieldint(&p,at,"end",when+1,length,&end)||
+            if(!jobject(&p,at,"id kind sample source_id end offset volume")||(voice!=4&&!jfail(&p,at,CA_INVALID,"DPCM event requires voice 4"))||!fieldint(&p,at,"end",when+1,length,&end)||
                 !fieldint(&p,at,"offset",0,length,&offset)||!fieldint(&p,at,"volume",1,15,&volume))goto failure;
+            if(nk&&when<=kicks[nk-1].at){jfail(&p,jget(&p,at,"sample"),CA_INVALID,"Duplicate DPCM sample time");goto failure;}
             kicks[nk++]=(ChipDPCMHit){when,end-when,offset,(int)volume};
         }else{
             double gain;int destination=lookup(ids,5,&p,jget(&p,at,"destination_id"));
-            if(!jobject(&p,at,"id kind sample source_id end destination_id delay gain")||voice>1||destination!=1-voice||
-               !fieldint(&p,at,"end",when+1,length,&end)||!fieldint(&p,at,"delay",1,1323000,&delay)||!fieldnum(&p,at,"gain",0,1,&gain)||gain==0)goto failure;
+            if(!jobject(&p,at,"id kind sample source_id end destination_id delay gain")||((voice>1||destination!=1-voice)&&!jfail(&p,at,CA_INVALID,"Echo must route voice 0 to 1 or voice 1 to 0"))||
+               !fieldint(&p,at,"end",when+1,length,&end)||!fieldint(&p,at,"delay",1,1323000,&delay)||!fieldnum(&p,at,"gain",0,1,&gain)||(gain==0&&!jfail(&p,jget(&p,at,"gain"),CA_INVALID,"Echo gain must be greater than zero")))goto failure;
             echo[ne++]=(ChipEchoTap){when,end,delay,voice,gain};
         }at=p.tokens[at].next;
     }
-    qsort(event_ids,n,sizeof(*event_ids),compare_ids);for(size_t i=1;i<n;i++)if(!strcmp(event_ids[i-1],event_ids[i]))goto failure;
+    qsort(event_ids,n,sizeof(*event_ids),compare_ids);for(size_t i=1;i<n;i++)if(!strcmp(event_ids[i-1],event_ids[i])){jduplicate(&p,events,event_ids[i]);goto failure;}
     s=calloc(1,sizeof(*s));if(!s)goto memory;atomic_init(&s->refs,1);
-    for(int i=0;i<4;i++)tracks[i].count=counts[i];s->audio=chip_audio_create(tracks,length,NULL);if(!s->audio)goto failure;
+    for(int i=0;i<4;i++)tracks[i].count=counts[i];ChipAudioError synth_error;s->audio=chip_audio_create(tracks,length,&synth_error);if(!s->audio){jfail(&p,synth_error==CHIP_AUDIO_MEMORY?SIZE_MAX:events,synth_error==CHIP_AUDIO_MEMORY?CA_MEMORY:CA_INVALID,"Cannot prepare synth events");goto failure;}
     for(int i=0;i<5;i++){s->muted[i]=gains[i]==0;chip_audio_set_voice_gain(s->audio,i,gains[i]>0?gains[i]:1);}
-    chip_audio_set_dpcm_shape(s->audio,attacks[4],decays[4]);if(!chip_audio_set_dpcm_kicks(s->audio,kicks,nk))goto failure;
+    chip_audio_set_dpcm_shape(s->audio,attacks[4],decays[4]);if(!chip_audio_set_dpcm_kicks(s->audio,kicks,nk)){jfail(&p,events,CA_INVALID,"Invalid DPCM timing or offset, or allocation failure");goto failure;}
     for(int i=0;i<4;i++)if(tracks[i].wave==CHIP_PULSE)chip_audio_set_pulse_duty(s->audio,i,sounds[initial[i]].duty);
     for(int i=0;i<2;i++)if(tracks[i].wave==CHIP_PULSE&&!chip_audio_set_pulse_changes(s->audio,i,changes[i],nc[i],onsets[i],no[i]))goto failure;
-    if(!chip_audio_set_echo_taps(s->audio,echo,ne))goto failure;
+    if(!chip_audio_set_echo_taps(s->audio,echo,ne)){jfail(&p,events,CA_INVALID,"Invalid echo intervals or allocation failure");goto failure;}
     const char *names[]={"once","first_pass","cycle"},*lengths[]={"once_samples","first_pass_samples","cycle_samples"};
     size_t total_visits=0;
     for(int plan=0;plan<3;plan++){
-        size_t list=jget(&p,plans,names[plan]);if(!array(&p,list,l->visits)||p.tokens[list].count>l->visits-total_visits)goto failure;
-        s->count[plan]=p.tokens[list].count;total_visits+=s->count[plan];if(plan<2&&!s->count[plan])goto failure;
+        size_t list=jget(&p,plans,names[plan]);if(!array(&p,list,l->visits)||(p.tokens[list].count>l->visits-total_visits&&!jfail(&p,list,CA_LIMIT,"Combined plans exceed visit limit")))goto failure;
+        s->count[plan]=p.tokens[list].count;total_visits+=s->count[plan];if(plan<2&&!s->count[plan]){jfail(&p,list,CA_INVALID,"Playback plan must not be empty");goto failure;}
         s->plans[plan]=calloc(s->count[plan]?s->count[plan]:1,sizeof(Visit));if(!s->plans[plan])goto memory;
         free(visit_ids);visit_ids=calloc(s->count[plan]?s->count[plan]:1,129);if(!visit_ids)goto memory;at=list+1;int64_t sum=0;
         for(size_t i=0;i<s->count[plan];i++){
@@ -150,10 +162,10 @@ CSSequence *cs_sequence_read(const char *text,size_t bytes,const CALimits *l,CAR
             strcpy(visit_ids[i],v->id);
             size_t passes=jget(&p,at,"passes");if(!array(&p,passes,l->repeat_depth))goto failure;
             size_t pass=passes+1;for(size_t j=0;j<p.tokens[passes].count;j++){char rid[129];int64_t number;if(!jobject(&p,pass,"repeat_id pass_number")||!idstring(&p,jget(&p,pass,"repeat_id"),rid)||!fieldint(&p,pass,"pass_number",1,65535,&number))goto failure;pass=p.tokens[pass].next;}
-            if(sum>l->performance_samples-(v->to-v->from))goto failure;sum+=v->to-v->from;at=p.tokens[at].next;
+            if(sum>l->performance_samples-(v->to-v->from)){jfail(&p,at,CA_LIMIT,"Plan duration exceeds performance_samples budget");goto failure;}sum+=v->to-v->from;at=p.tokens[at].next;
         }
-        qsort(visit_ids,s->count[plan],129,compare_ids);for(size_t i=1;i<s->count[plan];i++)if(!strcmp(visit_ids[i-1],visit_ids[i]))goto failure;
-        if(!fieldint(&p,0,lengths[plan],0,l->performance_samples,&s->lengths[plan])||s->lengths[plan]!=sum)goto failure;
+        qsort(visit_ids,s->count[plan],129,compare_ids);for(size_t i=1;i<s->count[plan];i++)if(!strcmp(visit_ids[i-1],visit_ids[i])){jduplicate(&p,list,visit_ids[i]);goto failure;}
+        if(!fieldint(&p,0,lengths[plan],0,l->performance_samples,&s->lengths[plan]))goto failure;if(s->lengths[plan]!=sum){jfail(&p,jget(&p,0,lengths[plan]),CA_INVALID,"Plan length must equal the sum of visit durations (%lld)",(long long)sum);goto failure;}
     }
     s->maps=p.tokens[positions].count;s->map=calloc(s->maps,sizeof(Map));if(!s->map)goto memory;at=positions+1;
     for(size_t i=0;i<s->maps;i++){
@@ -161,17 +173,17 @@ CSSequence *cs_sequence_read(const char *text,size_t bytes,const CALimits *l,CAR
             !fieldint(&p,at,"from_tick",0,INT64_MAX-1,&v->from_tick)||!fieldint(&p,at,"to_tick",v->from_tick+1,INT64_MAX,&v->to_tick)||
             !fieldint(&p,at,"from_sample",0,length-1,&v->from)||!fieldint(&p,at,"to_sample",v->from,length,&v->to)||
             !fieldnum(&p,at,"bpm_from",.001,100000,&v->bpm_from)||!fieldnum(&p,at,"bpm_to",.001,100000,&v->bpm_to)||!fieldint(&p,at,"ppq",1,INT32_MAX,&v->ppq))goto failure;
-        if(i?(v->ppq!=s->map[i-1].ppq||v->from!=s->map[i-1].to||v->from_tick!=s->map[i-1].to_tick):(v->from||v->from_tick))goto failure;at=p.tokens[at].next;
+        if(i?(v->ppq!=s->map[i-1].ppq||v->from!=s->map[i-1].to||v->from_tick!=s->map[i-1].to_tick):(v->from||v->from_tick)){jfail(&p,at,CA_INVALID,"Position segments must cover the score continuously with one PPQ, starting at zero");goto failure;}at=p.tokens[at].next;
     }
-    if(s->map[s->maps-1].to!=length)goto failure;
-    for(size_t i=0;i<s->maps;i++)if(mapped_sample(s,s->map[i].from_tick)!=s->map[i].from||mapped_sample(s,s->map[i].to_tick)!=s->map[i].to)goto failure;
-    for(int plan=0;plan<3;plan++)for(size_t i=0;i<s->count[plan];i++){Visit *v=&s->plans[plan][i];if(mapped_sample(s,v->from_tick)!=v->from||mapped_sample(s,v->to_tick)!=v->to)goto failure;}
+    if(s->map[s->maps-1].to!=length){jfail(&p,positions,CA_INVALID,"Position segments must reach score_samples");goto failure;}
+    for(size_t i=0;i<s->maps;i++)if(mapped_sample(s,s->map[i].from_tick)!=s->map[i].from||mapped_sample(s,s->map[i].to_tick)!=s->map[i].to){size_t token=positions+1;for(size_t k=0;k<i;k++)token=p.tokens[token].next;jfail(&p,token,CA_INVALID,"Position sample endpoints disagree with tempo integration");goto failure;}
+    for(int plan=0;plan<3;plan++)for(size_t i=0;i<s->count[plan];i++){Visit *v=&s->plans[plan][i];if(mapped_sample(s,v->from_tick)!=v->from||mapped_sample(s,v->to_tick)!=v->to){size_t token=jget(&p,plans,names[plan])+1;for(size_t k=0;k<i;k++)token=p.tokens[token].next;jfail(&p,token,CA_INVALID,"Visit sample endpoints disagree with its ticks and tempo");goto failure;}}
     s->json=malloc(bytes+1);if(!s->json)goto memory;memcpy(s->json,text,bytes);s->json[bytes]=0;s->bytes=bytes;
     uint64_t current=atomic_load(&revisions);
     do {if(current==UINT64_MAX){if(error)*error=CA_OVERFLOW;goto failure;}}while(!atomic_compare_exchange_weak(&revisions,&current,current+1));s->revision=current;
-    if(error)*error=CA_OK;goto done;
+    if(error)*error=CA_OK;dreset(diagnostic);goto done;
 memory:if(error)*error=CA_MEMORY;
-failure:sequence_free(s);s=NULL;
+failure:jfinish(&p,error,"Invalid sequence: inconsistent events, source settings, or playback plan");sequence_free(s);s=NULL;
 done:free(p.tokens);free(sounds);free(event_ids);free(visit_ids);for(int i=0;i<4;i++)free(notes[i]);for(int i=0;i<2;i++){free(changes[i]);free(onsets[i]);}free(kicks);free(echo);return s;
 }
 CAResult cs_sequence_write(const CSSequence *s,char *buffer,size_t capacity,size_t *required){if(!s||!required)return CA_INVALID;*required=s->bytes;if(!buffer)return CA_OK;if(capacity<s->bytes)return CA_LIMIT;memcpy(buffer,s->json,s->bytes);return CA_OK;}
