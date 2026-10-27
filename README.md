@@ -1,6 +1,6 @@
 # chip-sequencer
 
-MIT-licensed C11 sequencer and performance compiler. Depends only on chip-audio
+C11 sequencer and performance compiler. Depends only on chip-audio
 and the C library. No application, OS audio device or Objective-C dependency.
 
 `chip-performance` JSON describes resolved MIDI notes, source settings, expression,
@@ -52,3 +52,7 @@ paused. Stable song IDs are caller-owned, not inferred from an array position.
 the entire DSP/mixer/sequencer with allocation/free guards and sanitizers;
 `tests/fuzz.c` is a libFuzzer entrypoint, with `mutation-test.c` as a deterministic
 runner when the toolchain lacks libFuzzer. Musical samples are synthetic.
+
+## License
+
+[MIT](LICENSE).

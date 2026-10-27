@@ -22,3 +22,10 @@ test: $(BUILD_DIR)/sequence-test $(BUILD_DIR)/compile-test
 	$(BUILD_DIR)/sequence-test examples/sequence.json
 	$(BUILD_DIR)/compile-test examples/performance.json $(BUILD_DIR)/compiled.json
 	$(BUILD_DIR)/sequence-test $(BUILD_DIR)/compiled.json
+
+$(BUILD_DIR)/model-probe: tests/model-probe.c $(BUILD_DIR)/libchip-sequencer.a $(CHIP_AUDIO_LIB)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(BUILD_DIR)/libchip-sequencer.a $(CHIP_AUDIO_LIB) -lm -o $@
+test: test-controls
+.PHONY: test-controls
+test-controls: $(BUILD_DIR)/model-probe
+	python3 tests/control-test.py $(BUILD_DIR)/model-probe

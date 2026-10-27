@@ -21,7 +21,11 @@ static size_t list(const JP *p,size_t at,const char *key,size_t max,int *ok){siz
 typedef struct {int64_t a,b;double from,to,seconds,duration;} Tempo;
 typedef struct {int64_t at,end,release,release_samples,offset,delay;int kind,voice,pitch,volume,dest;double gain;size_t sound;uint64_t id;} Event;
 typedef struct {int64_t a,b;size_t stack[16];int passes[16],depth;} CVisit;
+typedef struct {int voice,kind; int64_t at,end; double from,to; size_t sound,order;} Control;
+typedef struct {int source,destination; int64_t from,to,delay; double gain;} Echo;
 typedef struct {
+    Control *expression,*sound_control; size_t expression_count,sound_count;
+    Echo *echo_control; size_t echo_count;
     JP p;CALimits limits;int ok;int64_t ppq,end,length;
     Tempo *tempo;size_t tempos;Event *events;size_t count,capacity;
     CVisit *visits;size_t visits_count,visits_capacity;
@@ -45,14 +49,183 @@ static double tick_at(Compile *c,int64_t s){
     double seconds=(double)s/44100.;
     for(size_t i=0;i<c->tempos;i++){Tempo *t=&c->tempo[i];if(seconds<=t->seconds+t->duration){double slope=(t->to-t->from)/(double)(t->b-t->a),elapsed=seconds-t->seconds;return t->a+cs_tempo_ticks(elapsed,t->from,slope,c->ppq);}}return c->end;
 }
-static size_t sound_at(Compile *c,int v,int64_t tick){size_t result=c->initial[v],at=c->changes+1;int64_t last=-1;for(size_t i=0;i<c->p.tokens[c->changes].count;i++){
-    int cv=voice(c,jget(&c->p,at,"source_id"));int64_t t=integer(&c->p,at,"tick",0,c->end-1,&c->ok);if(cv==v&&t<=tick&&t>last){last=t;result=sound(c,jget(&c->p,at,"sound_id"));}at=c->p.tokens[at].next;}return result;
+// Resolve controls once. Generation queries typed, voice-local time indexes;
+// it never rescans expression/sound JSON for each 441-sample fragment.
+static int control_compare(const void *a, const void *b) {
+    const Control *x=a, *y=b;
+    if (x->voice!=y->voice) return x->voice-y->voice;
+    if (x->at!=y->at) return x->at<y->at?-1:1;
+    if (x->kind!=y->kind) return x->kind-y->kind;
+    // Equal-time hairpins: last input wins. Dynamics/sounds: first input wins.
+    if (x->order==y->order) return 0;
+    int order=x->order<y->order?-1:1;
+    return x->kind==1?order:-order;
 }
-static int volume_at(Compile *c,int v,int64_t tick,int base){
-    double value=base;int64_t last=-1;size_t at=c->hairpins+1;
-    for(size_t i=0;i<c->p.tokens[c->hairpins].count;i++){int cv=voice(c,jget(&c->p,at,"source_id"));int64_t a=integer(&c->p,at,"from_tick",0,c->end-1,&c->ok),b=integer(&c->p,at,"to_tick",a+1,c->end,&c->ok);double from=number(&c->p,at,"from_volume",1,15,&c->ok),to=number(&c->p,at,"to_volume",1,15,&c->ok);if(cv==v&&a<=tick&&a>=last){last=a;value=from+fmin(1.,(double)(tick-a)/(b-a))*(to-from);}at=c->p.tokens[at].next;}
-    at=c->dynamics+1;for(size_t i=0;i<c->p.tokens[c->dynamics].count;i++){int cv=voice(c,jget(&c->p,at,"source_id"));int64_t t=integer(&c->p,at,"tick",0,c->end-1,&c->ok);int level=(int)integer(&c->p,at,"volume",1,15,&c->ok);if(cv==v&&t<=tick&&t>last){last=t;value=level;}at=c->p.tokens[at].next;}
-    int result=(int)llround(value);return result<1?1:result>15?15:result;
+static const Control *control_at(const Control *items, size_t count, int voice, int64_t tick) {
+    size_t lo=0, hi=count;
+    while (lo<hi) {
+        size_t mid=lo+(hi-lo)/2;
+        const Control *v=&items[mid];
+        if (v->voice<voice || (v->voice==voice && v->at<=tick)) lo=mid+1;
+        else hi=mid;
+    }
+    return lo && items[lo-1].voice==voice ? &items[lo-1] : NULL;
+}
+static int prepare_controls(Compile *c) {
+    JP *p=&c->p;
+    size_t nd=p->tokens[c->dynamics].count, nh=p->tokens[c->hairpins].count;
+    size_t ns=p->tokens[c->changes].count;
+    size_t cap=c->limits.allocated_bytes/(16*sizeof(Control));
+    if (nd>cap || nh>cap-nd || ns>cap-nd-nh) return 0;
+    c->expression_count=nd+nh;
+    c->sound_count=ns;
+    c->expression=calloc(nd+nh?nd+nh:1,sizeof(Control));
+    c->sound_control=calloc(ns?ns:1,sizeof(Control));
+    if (!c->expression || !c->sound_control) return 0;
+    size_t arrays[]={c->dynamics,c->hairpins,c->changes};
+    for (int kind=0;kind<3;kind++) {
+        size_t at=arrays[kind]+1;
+        for (size_t i=0;i<p->tokens[arrays[kind]].count;i++) {
+            Control v={.voice=voice(c,jget(p,at,"source_id")),.kind=kind,.order=i};
+            v.at=integer(p,at,kind==1?"from_tick":"tick",0,c->end-1,&c->ok);
+            if (kind==0) v.from=v.to=integer(p,at,"volume",1,15,&c->ok);
+            else if (kind==1) {
+                v.end=integer(p,at,"to_tick",v.at+1,c->end,&c->ok);
+                v.from=number(p,at,"from_volume",1,15,&c->ok);
+                v.to=number(p,at,"to_volume",1,15,&c->ok);
+            } else v.sound=sound(c,jget(p,at,"sound_id"));
+            if (kind==2) c->sound_control[i]=v;
+            else c->expression[kind==0?i:nd+i]=v;
+            at=p->tokens[at].next;
+        }
+    }
+    qsort(c->expression,c->expression_count,sizeof(Control),control_compare);
+    qsort(c->sound_control,c->sound_count,sizeof(Control),control_compare);
+    return c->ok;
+}
+static size_t sound_at(Compile *c, int voice, int64_t tick) {
+    const Control *v=control_at(c->sound_control,c->sound_count,voice,tick);
+    return v?v->sound:c->initial[voice];
+}
+static int volume_at(Compile *c, int voice, int64_t tick, int base) {
+    const Control *v=control_at(c->expression,c->expression_count,voice,tick);
+    double value=base;
+    if (v) value=v->kind==1?
+        v->from+fmin(1.,(double)(tick-v->at)/(v->end-v->at))*(v->to-v->from):v->from;
+    int result=(int)llround(value);
+    return result<1?1:result>15?15:result;
+}
+
+static int echo_compare(const void *a, const void *b) {
+    const Echo *x=a, *y=b;
+    if (x->source!=y->source) return x->source-y->source;
+    return x->from<y->from?-1:x->from>y->from;
+}
+static const Echo *echo_at(const Compile *c, int voice, int64_t tick) {
+    size_t lo=0,hi=c->echo_count;
+    while (lo<hi) {
+        size_t mid=lo+(hi-lo)/2;
+        const Echo *v=&c->echo_control[mid];
+        if (v->source<voice || (v->source==voice && v->from<=tick)) lo=mid+1;
+        else hi=mid;
+    }
+    if (!lo) return NULL;
+    const Echo *v=&c->echo_control[lo-1];
+    return v->source==voice && tick<v->to?v:NULL;
+}
+// Echo delay is validated even if its arrival is beyond the song. Beyond the
+// last tempo segment the endpoint BPM is held; the song boundary never clamps
+// the delay or silently makes an invalid setting disappear.
+static double delay_samples(const Compile *c, double start, int64_t ticks) {
+    double end=start+(double)ticks, seconds=0;
+    for (size_t i=0;i<c->tempos && start<end;i++) {
+        const Tempo *t=&c->tempo[i];
+        if (start>=t->b) continue;
+        double stop=fmin(end,(double)t->b);
+        double slope=(t->to-t->from)/(double)(t->b-t->a);
+        double from=t->from+slope*(start-t->a);
+        seconds+=cs_tempo_seconds(stop-start,from,slope,c->ppq);
+        start=stop;
+    }
+    if (start<end) seconds+=cs_tempo_seconds(end-start,c->tempo[c->tempos-1].to,0,c->ppq);
+    return seconds*44100;
+}
+static void tempo_line(const Compile *c, double at, double *bpm, double *slope) {
+    for (size_t i=0;i<c->tempos;i++) {
+        const Tempo *t=&c->tempo[i];
+        if (at<t->b) {
+            *slope=(t->to-t->from)/(double)(t->b-t->a);
+            *bpm=t->from+*slope*(at-t->a);
+            return;
+        }
+    }
+    *bpm=c->tempo[c->tempos-1].to; *slope=0;
+}
+static int valid_delay_at(const Compile *c, const Echo *e, double at) {
+    double samples=delay_samples(c,at,e->delay);
+    return isfinite(samples) && samples>=1-1e-7 && samples<=1323000+1e-7;
+}
+static int valid_echo_delay(const Compile *c, const Echo *e, int64_t *cuts) {
+    double max_bpm=0;
+    for (size_t i=0;i<c->tempos;i++) max_bpm=fmax(max_bpm,fmax(c->tempo[i].from,c->tempo[i].to));
+    if (e->delay>INT64_MAX-c->end ||
+        (double)e->delay*60*44100/(max_bpm*c->ppq)>1323000+1e-7) return 0;
+    size_t count=0;
+    cuts[count++]=e->from; cuts[count++]=e->to-1;
+    // The delay integral changes derivative at tempo boundaries and at those
+    // boundaries shifted by -delay. Between them an extremum satisfies
+    // BPM(t)==BPM(t+delay); both sides are affine, so there is at most one root.
+    for (size_t i=0;i<c->tempos;i++) {
+        int64_t points[]={c->tempo[i].b,c->tempo[i].b-e->delay};
+        for (int j=0;j<2;j++) if (points[j]>e->from && points[j]<e->to-1) cuts[count++]=points[j];
+    }
+    qsort(cuts,count,sizeof(*cuts),cmp64);
+    for (size_t i=0;i<count;i++) {
+        if (!valid_delay_at(c,e,(double)cuts[i])) return 0;
+        if (!i || cuts[i]==cuts[i-1]) continue;
+        double a=cuts[i-1],b=cuts[i],mid=a+(b-a)/2;
+        double from,to,from_slope,to_slope;
+        tempo_line(c,mid,&from,&from_slope);
+        tempo_line(c,mid+(double)e->delay,&to,&to_slope);
+        double slope=to_slope-from_slope;
+        if (slope!=0) {
+            double root=mid-(to-from)/slope;
+            if (root>a && root<b) {
+                // Onsets are integer ticks. Check the neighbors of an extremum.
+                if (!valid_delay_at(c,e,floor(root)) || !valid_delay_at(c,e,ceil(root))) return 0;
+            }
+        }
+    }
+    return 1;
+}
+static int prepare_echoes(Compile *c) {
+    JP *p=&c->p;
+    c->echo_count=p->tokens[c->echoes].count;
+    if (c->echo_count>c->limits.allocated_bytes/(32*sizeof(Echo)) ||
+        c->tempos>c->limits.allocated_bytes/(64*sizeof(int64_t))) return 0;
+    c->echo_control=calloc(c->echo_count?c->echo_count:1,sizeof(Echo));
+    int64_t *cuts=calloc(2+2*c->tempos,sizeof(int64_t));
+    if (!c->echo_control || !cuts) { free(cuts); return 0; }
+    size_t at=c->echoes+1;
+    for (size_t i=0;i<c->echo_count;i++) {
+        Echo *e=&c->echo_control[i];
+        e->source=voice(c,jget(p,at,"source_id"));
+        e->destination=voice(c,jget(p,at,"destination_id"));
+        e->from=integer(p,at,"from_tick",0,c->end-1,&c->ok);
+        e->to=integer(p,at,"to_tick",e->from+1,c->end,&c->ok);
+        e->delay=integer(p,at,"delay_ticks",1,INT64_MAX,&c->ok);
+        e->gain=number(p,at,"gain",0,1,&c->ok);
+        if (!c->ok || e->source>1 || e->destination!=1-e->source || e->gain==0 ||
+            !valid_echo_delay(c,e,cuts)) { free(cuts); return 0; }
+        at=p->tokens[at].next;
+    }
+    free(cuts);
+    qsort(c->echo_control,c->echo_count,sizeof(Echo),echo_compare);
+    for (size_t i=1;i<c->echo_count;i++) {
+        const Echo *a=&c->echo_control[i-1],*b=&c->echo_control[i];
+        if (a->source==b->source && a->to>b->from) return 0;
+    }
+    return 1;
 }
 static void event(Compile *c,Event e){
     if(!c->ok)return;if(c->count>=c->limits.events){c->ok=0;return;}
@@ -173,9 +346,7 @@ CSSequence *cs_compile(const CSModel *m,const CALimits *limits,CAResult *error){
         int64_t t=integer(p,at,"tick",0,c.end-1,&c.ok),den=integer(p,at,"denominator",1,64,&c.ok);integer(p,at,"numerator",1,64,&c.ok);
         if((!i&&t)||t<=previous_meter||(den&(den-1)))goto done;previous_meter=t;at=p->tokens[at].next;
     }
-    at=c.dynamics+1;for(size_t i=0;i<p->tokens[c.dynamics].count;i++){voice(&c,jget(p,at,"source_id"));integer(p,at,"tick",0,c.end-1,&c.ok);integer(p,at,"volume",1,15,&c.ok);at=p->tokens[at].next;}
-    at=c.hairpins+1;for(size_t i=0;i<p->tokens[c.hairpins].count;i++){voice(&c,jget(p,at,"source_id"));int64_t a=integer(p,at,"from_tick",0,c.end-1,&c.ok);integer(p,at,"to_tick",a+1,c.end,&c.ok);number(p,at,"from_volume",1,15,&c.ok);number(p,at,"to_volume",1,15,&c.ok);at=p->tokens[at].next;}
-    at=c.echoes+1;for(size_t i=0;i<p->tokens[c.echoes].count;i++){int src=voice(&c,jget(p,at,"source_id")),dest=voice(&c,jget(p,at,"destination_id"));if(src>1||dest!=1-src)goto done;int64_t a=integer(p,at,"from_tick",0,c.end-1,&c.ok);integer(p,at,"to_tick",a+1,c.end,&c.ok);integer(p,at,"delay_ticks",1,INT64_MAX,&c.ok);if(number(p,at,"gain",0,1,&c.ok)==0)goto done;at=p->tokens[at].next;}
+    if(!prepare_controls(&c)||!prepare_echoes(&c))goto done;
     at=c.drums+1;unsigned drum_mask=0;for(size_t i=0;i<4;i++){size_t kind=jget(p,at,"kind");int d=jeq(p,kind,"kick")?0:jeq(p,kind,"snare")?1:jeq(p,kind,"open")?2:jeq(p,kind,"close")?3:-1;if(d<0||(drum_mask&(1u<<d)))goto done;drum_mask|=1u<<d;integer(p,at,"tone",-127,127,&c.ok);integer(p,at,"decay_ms",5,800,&c.ok);number(p,at,"gain",0,2,&c.ok);at=p->tokens[at].next;}
     if(!c.ok)goto done;
     // Explicit settings changes are copied; source defaults remain fully declared.
@@ -217,8 +388,14 @@ CSSequence *cs_compile(const CSModel *m,const CALimits *limits,CAResult *error){
                 for(int64_t t=original.at;t<end2;t+=441){Event e=original;e.at=t;e.end=t+441<end2?t+441:end2;int vol=volume_at(&c,v,(int64_t)floor(tick_at(&c,t)+1e-7),base);if(accent)vol=vol+3>15?15:vol+3;e.volume=(int)llround((double)original.volume*vol/initial_level);if(e.volume<1)e.volume=1;if(e.volume>15)e.volume=15;if(t==original.at){e.id=c.events[j].id;c.events[j]=e;}else event(&c,e);}}
         }
         if(v<2)event(&c,(Event){.kind=1,.voice=v,.at=onset,.end=end});
-        if(v<2){size_t e=c.echoes+1;for(size_t j=0;j<p->tokens[c.echoes].count;j++){
-            int src=voice(&c,jget(p,e,"source_id"));int64_t a=integer(p,e,"from_tick",0,c.end-1,&c.ok),b=integer(p,e,"to_tick",a+1,c.end,&c.ok),dt=integer(p,e,"delay_ticks",1,INT64_MAX,&c.ok);if(src==v&&nt>=a&&nt<b&&dt<c.end-nt){int64_t begin=sample(&c,nt),delay=sample(&c,nt+dt)-begin;size_t snd=sound_at(&c,v,et);int64_t release=llround(number(p,snd,"release_seconds",0,10,&c.ok)*44100),to=sample(&c,et);to=release>next-to?next:to+release;event(&c,(Event){.kind=4,.voice=v,.dest=voice(&c,jget(p,e,"destination_id")),.at=begin,.end=to,.delay=delay,.gain=number(p,e,"gain",0,1,&c.ok)});}e=p->tokens[e].next;}}
+        const Echo *echo=v<2?echo_at(&c,v,nt):NULL;
+        if(echo && echo->delay<c.end-nt){
+            int64_t begin=sample(&c,nt),delay=sample(&c,nt+echo->delay)-begin;
+            size_t snd=sound_at(&c,v,et);
+            int64_t release=llround(number(p,snd,"release_seconds",0,10,&c.ok)*44100),to=sample(&c,et);
+            to=release>next-to?next:to+release;
+            event(&c,(Event){.kind=4,.voice=v,.dest=echo->destination,.at=begin,.end=to,.delay=delay,.gain=echo->gain});
+        }
     }
     if(!valid_order_ids(&c,jget(p,0,"order"))||!valid_order_tree(&c,jget(p,0,"order"),0))goto done;
     order(&c,jget(p,0,"order"),(CVisit){0},0);if(!c.ok||!c.visits_count)goto done;
@@ -245,5 +422,5 @@ CSSequence *cs_compile(const CSModel *m,const CALimits *limits,CAResult *error){
         for(size_t i=begin;i<finish;i++){if(i>begin)writef(&w,",");write_visit(&w,&c,&c.visits[i],i);}writef(&w,"]");}
     writef(&w,"},\"positions\":[");for(size_t i=0;i<c.tempos;i++){Tempo *t=&c.tempo[i];if(i)writef(&w,",");writef(&w,"{\"from_tick\":%lld,\"to_tick\":%lld,\"from_sample\":%lld,\"to_sample\":%lld,\"bpm_from\":%.17g,\"bpm_to\":%.17g,\"ppq\":%lld}",(long long)t->a,(long long)t->b,(long long)sample(&c,t->a),(long long)sample(&c,t->b),t->from,t->to,(long long)c.ppq);}writef(&w,"]}");
     if(c.ok&&!w.failed){CALimits decode=*limits;decode.allocated_bytes/=2;result=cs_sequence_read(w.data,w.used,&decode,error);}
-done:free(c.p.tokens);free(cuts);free(c.tempo);free(c.events);free(c.visits);free(note_tokens);free(refs);free(w.data);return result;
+done:free(c.expression);free(c.sound_control);free(c.echo_control);free(c.p.tokens);free(cuts);free(c.tempo);free(c.events);free(c.visits);free(note_tokens);free(refs);free(w.data);return result;
 }
