@@ -1,0 +1,335 @@
+{
+  "format": "chip-sequence",
+  "version": 1,
+  "song_id": "repeat-example",
+  "sample_rate": 44100,
+  "score_samples": 352800,
+  "once_samples": 441000,
+  "first_pass_samples": 352800,
+  "cycle_samples": 352800,
+  "sources": [
+    {
+      "id": "voice0",
+      "track_id": "track0",
+      "voice": 0,
+      "wave": "pulse",
+      "gain": 1,
+      "initial_sound": "plain",
+      "dpcm_attack_percent": 100,
+      "dpcm_decay_ms": 100
+    },
+    {
+      "id": "voice1",
+      "track_id": "track1",
+      "voice": 1,
+      "wave": "pulse",
+      "gain": 1,
+      "initial_sound": "plain",
+      "dpcm_attack_percent": 100,
+      "dpcm_decay_ms": 100
+    },
+    {
+      "id": "voice2",
+      "track_id": "track2",
+      "voice": 2,
+      "wave": "triangle",
+      "gain": 1.8,
+      "initial_sound": "plain",
+      "dpcm_attack_percent": 100,
+      "dpcm_decay_ms": 100
+    },
+    {
+      "id": "voice3",
+      "track_id": "track3",
+      "voice": 3,
+      "wave": "noise",
+      "gain": 1,
+      "initial_sound": "plain",
+      "dpcm_attack_percent": 100,
+      "dpcm_decay_ms": 100
+    },
+    {
+      "id": "voice4",
+      "track_id": "track4",
+      "voice": 4,
+      "wave": "dpcm",
+      "gain": 1.5,
+      "initial_sound": "plain",
+      "dpcm_attack_percent": 100,
+      "dpcm_decay_ms": 100
+    }
+  ],
+  "sounds": [
+    {
+      "id": "plain",
+      "duty": 0.25,
+      "vibrato_hz": 6,
+      "vibrato_cents": 0,
+      "vibrato_delay_seconds": 0,
+      "attack_seconds": 0,
+      "decay_seconds": 0,
+      "sustain_level": 1,
+      "release_seconds": 0,
+      "tom_enabled": false,
+      "tom_seconds": 0.1,
+      "tom_semitones": 24
+    }
+  ],
+  "events": [
+    {
+      "id": "on0",
+      "kind": "onset",
+      "sample": 0,
+      "source_id": "voice0",
+      "end": 88200
+    },
+    {
+      "id": "seg0",
+      "kind": "segment",
+      "sample": 0,
+      "source_id": "voice0",
+      "end": 85995,
+      "pitch": 60,
+      "volume": 10,
+      "release_at": 0,
+      "release_samples": 0
+    },
+    {
+      "id": "on1",
+      "kind": "onset",
+      "sample": 88200,
+      "source_id": "voice0",
+      "end": 176400
+    },
+    {
+      "id": "seg1",
+      "kind": "segment",
+      "sample": 88200,
+      "source_id": "voice0",
+      "end": 174195,
+      "pitch": 61,
+      "volume": 10,
+      "release_at": 0,
+      "release_samples": 0
+    },
+    {
+      "id": "on2",
+      "kind": "onset",
+      "sample": 176400,
+      "source_id": "voice0",
+      "end": 264600
+    },
+    {
+      "id": "seg2",
+      "kind": "segment",
+      "sample": 176400,
+      "source_id": "voice0",
+      "end": 262395,
+      "pitch": 62,
+      "volume": 10,
+      "release_at": 0,
+      "release_samples": 0
+    },
+    {
+      "id": "on3",
+      "kind": "onset",
+      "sample": 264600,
+      "source_id": "voice0",
+      "end": 352800
+    },
+    {
+      "id": "seg3",
+      "kind": "segment",
+      "sample": 264600,
+      "source_id": "voice0",
+      "end": 350595,
+      "pitch": 63,
+      "volume": 10,
+      "release_at": 0,
+      "release_samples": 0
+    }
+  ],
+  "plans": {
+    "once": [
+      {
+        "id": "A1",
+        "from_sample": 0,
+        "to_sample": 88200,
+        "from_tick": 0,
+        "to_tick": 384,
+        "passes": [
+          {
+            "repeat_id": "repeat",
+            "pass_number": 1
+          }
+        ]
+      },
+      {
+        "id": "B1",
+        "from_sample": 88200,
+        "to_sample": 176400,
+        "from_tick": 384,
+        "to_tick": 768,
+        "passes": [
+          {
+            "repeat_id": "repeat",
+            "pass_number": 1
+          }
+        ]
+      },
+      {
+        "id": "A2",
+        "from_sample": 0,
+        "to_sample": 88200,
+        "from_tick": 0,
+        "to_tick": 384,
+        "passes": [
+          {
+            "repeat_id": "repeat",
+            "pass_number": 2
+          }
+        ]
+      },
+      {
+        "id": "C2",
+        "from_sample": 176400,
+        "to_sample": 264600,
+        "from_tick": 768,
+        "to_tick": 1152,
+        "passes": [
+          {
+            "repeat_id": "repeat",
+            "pass_number": 2
+          }
+        ]
+      },
+      {
+        "id": "D",
+        "from_sample": 264600,
+        "to_sample": 352800,
+        "from_tick": 1152,
+        "to_tick": 1536,
+        "passes": []
+      }
+    ],
+    "first_pass": [
+      {
+        "id": "A1",
+        "from_sample": 0,
+        "to_sample": 88200,
+        "from_tick": 0,
+        "to_tick": 384,
+        "passes": [
+          {
+            "repeat_id": "repeat",
+            "pass_number": 1
+          }
+        ]
+      },
+      {
+        "id": "B1",
+        "from_sample": 88200,
+        "to_sample": 176400,
+        "from_tick": 384,
+        "to_tick": 768,
+        "passes": [
+          {
+            "repeat_id": "repeat",
+            "pass_number": 1
+          }
+        ]
+      },
+      {
+        "id": "A2",
+        "from_sample": 0,
+        "to_sample": 88200,
+        "from_tick": 0,
+        "to_tick": 384,
+        "passes": [
+          {
+            "repeat_id": "repeat",
+            "pass_number": 2
+          }
+        ]
+      },
+      {
+        "id": "C2",
+        "from_sample": 176400,
+        "to_sample": 264600,
+        "from_tick": 768,
+        "to_tick": 1152,
+        "passes": [
+          {
+            "repeat_id": "repeat",
+            "pass_number": 2
+          }
+        ]
+      }
+    ],
+    "cycle": [
+      {
+        "id": "A1",
+        "from_sample": 0,
+        "to_sample": 88200,
+        "from_tick": 0,
+        "to_tick": 384,
+        "passes": [
+          {
+            "repeat_id": "repeat",
+            "pass_number": 1
+          }
+        ]
+      },
+      {
+        "id": "B1",
+        "from_sample": 88200,
+        "to_sample": 176400,
+        "from_tick": 384,
+        "to_tick": 768,
+        "passes": [
+          {
+            "repeat_id": "repeat",
+            "pass_number": 1
+          }
+        ]
+      },
+      {
+        "id": "A2",
+        "from_sample": 0,
+        "to_sample": 88200,
+        "from_tick": 0,
+        "to_tick": 384,
+        "passes": [
+          {
+            "repeat_id": "repeat",
+            "pass_number": 2
+          }
+        ]
+      },
+      {
+        "id": "C2",
+        "from_sample": 176400,
+        "to_sample": 264600,
+        "from_tick": 768,
+        "to_tick": 1152,
+        "passes": [
+          {
+            "repeat_id": "repeat",
+            "pass_number": 2
+          }
+        ]
+      }
+    ]
+  },
+  "positions": [
+    {
+      "from_tick": 0,
+      "to_tick": 1536,
+      "from_sample": 0,
+      "to_sample": 352800,
+      "bpm_from": 120,
+      "bpm_to": 120,
+      "ppq": 96
+    }
+  ]
+}

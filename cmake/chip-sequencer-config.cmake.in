@@ -1,0 +1,4 @@
+@PACKAGE_INIT@
+include(CMakeFindDependencyMacro)
+find_dependency(chip-audio CONFIG)
+include("${CMAKE_CURRENT_LIST_DIR}/chip-sequencer-targets.cmake")

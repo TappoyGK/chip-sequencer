@@ -1,0 +1,221 @@
+{
+  "format": "chip-performance",
+  "version": 1,
+  "song_id": "repeat-example",
+  "ppq": 96,
+  "end_tick": 1536,
+  "sources": [
+    {
+      "id": "voice0",
+      "track_id": "track0",
+      "voice": 0,
+      "wave": "pulse",
+      "gain": 1,
+      "initial_sound": "plain",
+      "dpcm_attack_percent": 100,
+      "dpcm_decay_ms": 100
+    },
+    {
+      "id": "voice1",
+      "track_id": "track1",
+      "voice": 1,
+      "wave": "pulse",
+      "gain": 1,
+      "initial_sound": "plain",
+      "dpcm_attack_percent": 100,
+      "dpcm_decay_ms": 100
+    },
+    {
+      "id": "voice2",
+      "track_id": "track2",
+      "voice": 2,
+      "wave": "triangle",
+      "gain": 1.8,
+      "initial_sound": "plain",
+      "dpcm_attack_percent": 100,
+      "dpcm_decay_ms": 100
+    },
+    {
+      "id": "voice3",
+      "track_id": "track3",
+      "voice": 3,
+      "wave": "noise",
+      "gain": 1,
+      "initial_sound": "plain",
+      "dpcm_attack_percent": 100,
+      "dpcm_decay_ms": 100
+    },
+    {
+      "id": "voice4",
+      "track_id": "track4",
+      "voice": 4,
+      "wave": "dpcm",
+      "gain": 1.5,
+      "initial_sound": "plain",
+      "dpcm_attack_percent": 100,
+      "dpcm_decay_ms": 100
+    }
+  ],
+  "sounds": [
+    {
+      "id": "plain",
+      "duty": 0.25,
+      "vibrato_hz": 6,
+      "vibrato_cents": 0,
+      "vibrato_delay_seconds": 0,
+      "attack_seconds": 0,
+      "decay_seconds": 0,
+      "sustain_level": 1,
+      "release_seconds": 0,
+      "tom_enabled": false,
+      "tom_seconds": 0.1,
+      "tom_semitones": 24
+    }
+  ],
+  "tempos": [
+    {
+      "tick": 0,
+      "bpm": 120
+    }
+  ],
+  "tempo_ramps": [],
+  "meters": [
+    {
+      "tick": 0,
+      "numerator": 4,
+      "denominator": 4
+    }
+  ],
+  "notes": [
+    {
+      "id": "n0",
+      "source_id": "voice0",
+      "at": 0,
+      "end": 384,
+      "pitch": 60,
+      "volume": 10,
+      "accent": false,
+      "staccato": false,
+      "tom": false,
+      "drum": "none",
+      "grace_pitches": []
+    },
+    {
+      "id": "n1",
+      "source_id": "voice0",
+      "at": 384,
+      "end": 768,
+      "pitch": 61,
+      "volume": 10,
+      "accent": false,
+      "staccato": false,
+      "tom": false,
+      "drum": "none",
+      "grace_pitches": []
+    },
+    {
+      "id": "n2",
+      "source_id": "voice0",
+      "at": 768,
+      "end": 1152,
+      "pitch": 62,
+      "volume": 10,
+      "accent": false,
+      "staccato": false,
+      "tom": false,
+      "drum": "none",
+      "grace_pitches": []
+    },
+    {
+      "id": "n3",
+      "source_id": "voice0",
+      "at": 1152,
+      "end": 1536,
+      "pitch": 63,
+      "volume": 10,
+      "accent": false,
+      "staccato": false,
+      "tom": false,
+      "drum": "none",
+      "grace_pitches": []
+    }
+  ],
+  "sound_changes": [],
+  "dynamics": [],
+  "hairpins": [],
+  "drums": [
+    {
+      "kind": "snare",
+      "tone": 0,
+      "decay_ms": 100,
+      "gain": 1
+    },
+    {
+      "kind": "open",
+      "tone": 0,
+      "decay_ms": 100,
+      "gain": 1
+    },
+    {
+      "kind": "close",
+      "tone": 0,
+      "decay_ms": 100,
+      "gain": 1
+    },
+    {
+      "kind": "kick",
+      "tone": 0,
+      "decay_ms": 100,
+      "gain": 1
+    }
+  ],
+  "echoes": [],
+  "order": [
+    {
+      "id": "repeat",
+      "repeat_count": 2,
+      "body": [
+        {
+          "id": "A",
+          "from_tick": 0,
+          "to_tick": 384
+        }
+      ],
+      "endings": [
+        {
+          "passes": [
+            1
+          ],
+          "body": [
+            {
+              "id": "B",
+              "from_tick": 384,
+              "to_tick": 768
+            }
+          ]
+        },
+        {
+          "passes": [
+            2
+          ],
+          "body": [
+            {
+              "id": "C",
+              "from_tick": 768,
+              "to_tick": 1152
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D",
+      "from_tick": 1152,
+      "to_tick": 1536
+    }
+  ],
+  "loop": {
+    "from_tick": 0,
+    "to_tick": 1152
+  }
+}
