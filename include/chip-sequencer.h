@@ -46,6 +46,11 @@ CAResult cs_sequence_locate(const CSSequence *, CSMode, int64_t source_sample,
                             uint32_t *visit, int64_t *offset);
 CAResult cs_sequence_at(const CSSequence *, CSMode, int64_t performance_sample,
                         int64_t *source_sample, int64_t *remaining);
+/* The visit, the offset within it and the loop count of a performance point (samples from the
+   top in this mode): exactly what cs_prepare_seek takes to seek there. Unlike cs_sequence_locate,
+   which finds a source sample's first visit, a repeated section's later visits are found. */
+CAResult cs_sequence_visit_at(const CSSequence *, CSMode, int64_t performance_sample,
+                              uint32_t *visit, int64_t *offset, uint64_t *loop_count);
 CSPlayer *cs_player_prepare(const CSSequence *, CSMode, const CALimits *, CAResult *);
 void cs_player_destroy(CSPlayer *); /* caller-owned states only */
 CAResult cs_play(CAMixer *, CSPlayer *, int64_t at, CAHandle *);

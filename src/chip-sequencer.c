@@ -289,6 +289,20 @@ CAResult cs_sequence_locate(const CSSequence *s,CSMode mode,int64_t source_sampl
     return CA_NOT_PREPARED;
 }
 
+CAResult cs_sequence_visit_at(const CSSequence *s,CSMode mode,int64_t elapsed,uint32_t *visit,int64_t *offset,uint64_t *loops){
+    if(!s||!visit||!offset||!loops||elapsed<0||(mode!=CS_ONCE&&mode!=CS_LOOP))return CA_INVALID;
+    int plan=mode==CS_ONCE?0:1;uint64_t passes=0;
+    if(elapsed>=s->lengths[plan]){
+        if(mode!=CS_LOOP||!s->lengths[2])return CA_NOT_PREPARED;
+        int64_t past=elapsed-s->lengths[plan];passes=(uint64_t)(past/s->lengths[2])+1;elapsed=past%s->lengths[2];plan=2;
+    }
+    for(size_t i=0;i<s->count[plan];i++){
+        Visit *v=&s->plans[plan][i];int64_t n=v->to-v->from;
+        if(elapsed<n){if(i>UINT32_MAX)return CA_OVERFLOW;*visit=(uint32_t)i;*offset=elapsed;*loops=passes;return CA_OK;}
+        elapsed-=n;
+    }return CA_NOT_PREPARED;
+}
+
 CAResult cs_sequence_at(const CSSequence *s,CSMode mode,int64_t elapsed,int64_t *source,int64_t *remaining){
     if(!s||!source||!remaining||elapsed<0||(mode!=CS_ONCE&&mode!=CS_LOOP))return CA_INVALID;
     int plan=mode==CS_ONCE?0:1;

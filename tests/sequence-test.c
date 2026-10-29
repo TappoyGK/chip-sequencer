@@ -37,7 +37,39 @@ int main(int argc,char **argv){
     ca_mixer_destroy(m);cs_sequence_destroy(next);
     p=cs_player_prepare(s,CS_LOOP,&l,&error);assert(p);m=ca_mixer_create(&l,&error);assert(cs_play(m,p,0,&h)==CA_OK);
     assert(ca_mixer_advance(m,352801)==CA_OK);assert(cs_position(m,h,&pos)==CA_OK&&pos.loop_count==1&&pos.source_sample==1);
-    ca_mixer_destroy(m);cs_sequence_destroy(s);
+    ca_mixer_destroy(m);
+    // A performance point's visit (cs_sequence_visit_at): a fresh player seeked there is where the
+    // song played on from its top is at that point, visit, source sample, loop count and
+    // performance sample alike, a sample on (points in the first pass and loops on, a repeated
+    // section's later visits among them); a point on a visit's start sounds the same samples.
+    {
+        int64_t first=cs_sequence_plan_length(s,1),cycle=cs_sequence_plan_length(s,2);assert(first>0&&cycle>0);
+        int64_t points[]={1,4410,first/2,first-1,first,first+cycle/3,first+2*cycle+7};size_t count=sizeof(points)/sizeof(*points);
+        for(size_t k=0;k<count;k++){
+            uint32_t visit;int64_t offset;uint64_t loops;assert(cs_sequence_visit_at(s,CS_LOOP,points[k],&visit,&offset,&loops)==CA_OK);
+            assert(loops==(points[k]<first?0:(uint64_t)((points[k]-first)/cycle)+1));
+            CSPosition along,seeked;
+            p=cs_player_prepare(s,CS_LOOP,&l,&error);assert(p);m=ca_mixer_create(&l,&error);assert(cs_play(m,p,0,&h)==CA_OK);
+            assert(ca_mixer_advance(m,(size_t)points[k]+1)==CA_OK);assert(cs_position(m,h,&along)==CA_OK);ca_mixer_destroy(m);
+            CASeek *ticket=cs_prepare_seek(s,CS_LOOP,visit,offset,loops,&l,&error);assert(ticket);
+            p=cs_player_prepare(s,CS_LOOP,&l,&error);assert(p);m=ca_mixer_create(&l,&error);assert(cs_play(m,p,0,&h)==CA_OK);
+            CACommandID id;assert(cs_seek(m,h,ticket,0,&id)==CA_OK);assert(ca_mixer_advance(m,1)==CA_OK);assert(cs_position(m,h,&seeked)==CA_OK);ca_mixer_destroy(m);
+            assert(seeked.visit_index==along.visit_index&&seeked.source_sample==along.source_sample&&seeked.loop_count==along.loop_count&&seeked.performance_sample==along.performance_sample);
+        }
+        // On a visit's start (the second visit of the first pass, a repeat), the very samples.
+        int64_t start=first/2;uint32_t visit;int64_t offset;uint64_t loops;assert(cs_sequence_visit_at(s,CS_LOOP,start,&visit,&offset,&loops)==CA_OK&&offset==0&&visit>0);
+        size_t span=4410;int16_t *top=malloc((size_t)(start+(int64_t)span)*sizeof(*top)),*from=malloc(span*sizeof(*from));assert(top&&from);
+        p=cs_player_prepare(s,CS_LOOP,&l,&error);assert(p);m=ca_mixer_create(&l,&error);assert(cs_play(m,p,0,&h)==CA_OK);
+        for(int64_t at=0;at<start+(int64_t)span;){int64_t take=start+(int64_t)span-at<4096?start+(int64_t)span-at:4096;CAOutput out={.pcm=top+at};assert(ca_mixer_render(m,(size_t)take,&out)==CA_OK);at+=take;}
+        ca_mixer_destroy(m);
+        CASeek *ticket=cs_prepare_seek(s,CS_LOOP,visit,offset,loops,&l,&error);assert(ticket);
+        p=cs_player_prepare(s,CS_LOOP,&l,&error);assert(p);m=ca_mixer_create(&l,&error);assert(cs_play(m,p,0,&h)==CA_OK);
+        CACommandID id;assert(cs_seek(m,h,ticket,0,&id)==CA_OK);CAOutput out={.pcm=from};assert(ca_mixer_render(m,span,&out)==CA_OK);ca_mixer_destroy(m);
+        assert(!memcmp(top+start,from,span*sizeof(*from)));free(top);free(from);
+        assert(cs_sequence_visit_at(s,CS_ONCE,cs_sequence_plan_length(s,0),&visit,&offset,&loops)==CA_NOT_PREPARED);
+        assert(cs_sequence_visit_at(s,CS_LOOP,-1,&visit,&offset,&loops)==CA_INVALID);
+    }
+    cs_sequence_destroy(s);
     json[0]='[';assert(!cs_sequence_read(json,(size_t)bytes,&l,&error));free(json);
-    puts("sequence: strict read/write, once/loop, positions, prepared seek, live edit revision: PASS");return 0;
+    puts("sequence: strict read/write, once/loop, positions, prepared seek, a performance point's visit, live edit revision: PASS");return 0;
 }
